@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>geoimg report — {{ r.name }}</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root{--bg:#0b1120;--card:#131c31;--line:#22304d;--txt:#e2e8f0;--mut:#94a3b8;--acc:#22c55e;--warn:#f59e0b;--bad:#ef4444}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:var(--bg);color:var(--txt)}
+header{padding:22px 32px;background:linear-gradient(90deg,#0f766e,#1d4ed8);display:flex;justify-content:space-between;align-items:center}
+header h1{margin:0;font-size:22px}header .sub{color:#d1fae5;font-size:13px}
+main{max-width:1200px;margin:auto;padding:20px 24px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.full{grid-column:1/-1}h2{font-size:15px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);margin:0 0 10px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--mut);font-weight:600}img.thumb{max-width:100%;border-radius:10px}
+#map{height:340px;border-radius:10px}.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:700}
+.hi{background:#14532d;color:#86efac}.md{background:#713f12;color:#fde68a}.lo{background:#7f1d1d;color:#fecaca}
+.bar{height:8px;background:#1e293b;border-radius:4px;overflow:hidden;width:90px;display:inline-block;vertical-align:middle}
+.bar i{display:block;height:100%;background:var(--acc)}a{color:#7dd3fc}code,pre{background:#0a0f1c;border-radius:8px;font-size:12px}
+pre{padding:10px;overflow:auto;white-space:pre-wrap}.sw{display:inline-block;width:34px;height:22px;border-radius:5px;margin-right:6px;border:1px solid #334155}
+.big{font-size:28px;font-weight:800}.mut{color:var(--mut);font-size:12px}.ethics{background:#1f1630;border-color:#4c1d95}
+</style></head><body>
+<header><div><h1>🛰️ geoimg — Image Geolocation OSINT Report</h1>
+<div class="sub">{{ r.name }} · analysed {{ r.analyzed_at }} · {{ r.tool }}</div></div>
+<div class="sub">CyberWithMadhav · educational / authorized use only</div></header>
+<main>
+<section class="card"><h2>Image</h2><img class="thumb" src="data:image/jpeg;base64,{{ thumb }}" alt="thumbnail">
+<p class="mut">Dominant colours:</p>{% for c in r.colors %}<span class="sw" title="{{ c.hex }} {{ (c.share*100)|round(1) }}%" style="background:{{ c.hex }}"></span>{% endfor %}
+</section>
+
+<section class="card"><h2>Best location estimate</h2>
+{% if r.location %}
+{% set cf = r.location.confidence %}
+<div class="big">{{ '%.5f'|format(r.location.lat) }}, {{ '%.5f'|format(r.location.lon) }}</div>
+<p>Source: <b>{{ r.location.label }}</b> · radius ±{{ r.location.radius_km }} km ·
+<span class="pill {{ 'hi' if cf>=0.7 else ('md' if cf>=0.4 else 'lo') }}">confidence {{ (cf*100)|round|int }}%</span>
+{% if r.location.agreeing_clues %}<span class="mut"> (boosted: {{ r.location.agreeing_clues }} independent clues agree)</span>{% endif %}</p>
+{% if r.geocode and r.geocode.display_name %}<p>📍 {{ r.geocode.display_name }}</p>{% elif r.location.geocoded_as %}<p>📍 region centroid: {{ r.location.geocoded_as }}</p>{% endif %}
+<div id="map"></div>
+<p><a href="{{ r.links.google_maps }}" target="_blank">Google Maps</a> · <a href="{{ r.links.osm }}" target="_blank">OpenStreetMap</a>
+{% for k,v in r.verify_links.items() %} · <a href="{{ v }}" target="_blank">{{ k }}</a>{% endfor %}</p>
+<noscript><iframe width="100%" height="300" src="{{ r.links.osm_embed }}"></iframe></noscript>
+{% else %}<p>No location could be estimated. See clues below and try reverse image search.</p>{% endif %}
+{% if r.evidence.integrity_flags %}<p class="pill lo">⚠ integrity: {{ r.evidence.integrity_flags|join(', ') }}</p>{% endif %}
+</section>
+
+<section class="card full"><h2>Evidence chain (clue → inference → confidence)</h2>
+<table><tr><th>#</th><th>Clue</th><th>Inference</th><th>Confidence</th><th>Source / caveat</th></tr>
+{% for e in r.evidence.chain %}<tr><td>{{ loop.index }}</td><td>{{ e.clue }}</td><td>{{ e.inference }}</td>
+<td><span class="bar"><i style="width:{{ (e.confidence*100)|int }}%"></i></span> {{ (e.confidence*100)|int }}%</td>
+<td class="mut">{{ e.source }}{% if e.caveat %} — {{ e.caveat }}{% endif %}</td></tr>{% else %}<tr><td colspan=5>No clues found.</td></tr>{% endfor %}
+</table></section>
+
+<section class="card"><h2>Metadata ({{ r.metadata.engine }}, {{ r.metadata.raw_count }} tags)</h2>
+<table>{% for k,v in r.metadata.summary.items() %}<tr><th>{{ k }}</th><td>{{ v }}</td></tr>{% else %}<tr><td>No EXIF metadata (stripped, screenshot, or messaging-app copy).</td></tr>{% endfor %}
+{% if r.metadata.gps %}<tr><th>GPS (decimal)</th><td>{{ r.metadata.gps.lat }}, {{ r.metadata.gps.lon }}{% if r.metadata.gps.alt is defined %} · alt {{ r.metadata.gps.alt }} m{% endif %}</td></tr>{% endif %}
+<tr><th>EXIF thumbnail</th><td>{{ r.metadata.thumbnail.note or r.metadata.thumbnail.reason }}{% if r.metadata.thumbnail.hamming_distance is defined %} (pHash distance {{ r.metadata.thumbnail.hamming_distance }}){% endif %}</td></tr>
+</table></section>
+
+<section class="card"><h2>OCR & scripts</h2>
+{% if r.ocr.status == 'ok' %}<p class="mut">tesseract langs: {{ r.ocr.langs|join('+') }} · scripts: {% for k,v in r.ocr.scripts.counts.items() %}{{ k }}({{ v }}) {% endfor %}
+{% if r.ocr.scripts.devanagari_language_guess %}· {{ r.ocr.scripts.devanagari_language_guess }}{% endif %}</p>
+<pre>{{ r.ocr.text or '(no text found)' }}</pre>{% else %}<p>{{ r.ocr.reason }}</p>{% endif %}
+<p class="mut">{{ r.india.disclaimer }}</p></section>
+
+<section class="card"><h2>Manipulation checks</h2>
+<table><tr><th>ELA</th><td>mean error {{ r.manipulation.ela.mean_error }}, max {{ r.manipulation.ela.max_diff }}<br><span class="mut">{{ r.manipulation.ela.note }}</span></td></tr>
+<tr><th>Copy-move</th><td>{{ r.manipulation.clone.note or r.manipulation.clone.reason }} {% if r.manipulation.clone.keypoints is defined %}({{ r.manipulation.clone.keypoints }} kp, cluster {{ r.manipulation.clone.largest_shift_cluster }}){% endif %}</td></tr>
+<tr><th>AI-generated?</th><td>{{ (r.manipulation.ai.ai_likelihood*100)|int }}% — {{ r.manipulation.ai.reasons|join('; ') or 'no markers' }}<br><span class="mut">{{ r.manipulation.ai.label }}</span></td></tr></table>
+{% if ela %}<img class="thumb" style="max-height:220px" src="data:image/jpeg;base64,{{ ela }}" alt="ELA">{% endif %}</section>
+
+<section class="card"><h2>Sun / shadow</h2>
+{% if r.sun.status == 'ok' %}<table><tr><th>UTC</th><td>{{ r.sun.datetime_utc }} (EXIF time, assumed UTC+{{ r.sun.assumed_utc_offset_h }})</td></tr>
+{% if r.sun.candidate %}<tr><th>Sun at estimate</th><td>az {{ r.sun.candidate.sun_azimuth }}°, elev {{ r.sun.candidate.sun_elevation }}° — {{ 'consistent' if r.sun.candidate.consistent else r.sun.candidate.issues|join('; ') }}</td></tr>{% endif %}
+{% if r.sun.latitude_scan %}<tr><th>Lat scan</th><td>{% for b in r.sun.latitude_scan.best %}{{ b.lat }}° (err {{ b.err }}) {% endfor %}</td></tr>{% endif %}</table>
+{% else %}<p class="mut">{{ r.sun.reason }}</p>{% endif %}
+<h2 style="margin-top:14px">AI modules</h2>
+<p>Vision LLM: {% if r.vision_llm.status=='ok' %}{{ r.vision_llm.provider }} — {{ r.vision_llm.result.reasoning }}{% else %}<span class="mut">{{ r.vision_llm.reason }}</span>{% endif %}</p>
+<p>GeoCLIP: {% if r.geoclip.status=='ok' %}{% for t in r.geoclip.top_k %}{{ '%.3f'|format(t.lat) }},{{ '%.3f'|format(t.lon) }} ({{ '%.3f'|format(t.p) }}) {% endfor %}{% else %}<span class="mut">{{ r.geoclip.reason[:140] }}</span>{% endif %}</p>
+{% if geoclip_heatmap %}<img class="thumb" src="data:image/jpeg;base64,{{ geoclip_heatmap }}">{% endif %}
+</section>
+
+<section class="card"><h2>Overpass query (from clues)</h2>
+{% if r.overpass.status=='ok' %}<p>{{ r.overpass.description }} · <a href="{{ r.overpass.overpass_turbo }}" target="_blank">open in overpass-turbo</a></p><pre>{{ r.overpass.query }}</pre>
+{% if r.overpass.execution %}<p>Executed: {{ r.overpass.execution.count or r.overpass.execution.reason }}</p>{% endif %}
+{% else %}<p class="mut">{{ r.overpass.reason }}</p>{% endif %}</section>
+
+<section class="card"><h2>Reverse image search</h2><table>
+{% for l in r.reverse_search %}<tr><th>{{ l.engine }}</th><td>{% if l.url %}<a href="{{ l.url }}" target="_blank">search by URL</a> · {% endif %}<a href="{{ l.upload_page }}" target="_blank">upload page</a><br><span class="mut">{{ l.tip }}</span></td></tr>{% endfor %}
+</table><p class="mut">Aggregation page: {{ r.outputs.reverse_search_page }} (results are never scraped)</p></section>
+
+<section class="card full ethics"><h2>Ethics & confidence notes</h2>
+<p>Use only on your own images, CTF challenges, or investigations you are authorised to perform. Locating private individuals
+without consent can be stalking/harassment and may violate the IT Act 2000 and the Digital Personal Data Protection Act 2023.
+All non-GPS inferences are heuristic leads; GPS EXIF can be forged. Map data © OpenStreetMap contributors.</p></section>
+</main>
+<script>
+const loc = {{ loc_json|safe }};
+if (loc && window.L) {
+  const m = L.map('map').setView([loc.lat, loc.lon], loc.radius_km < 1 ? 16 : (loc.radius_km < 50 ? 10 : 6));
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxZoom: 19, attribution: '© OpenStreetMap'}).addTo(m);
+  L.marker([loc.lat, loc.lon]).addTo(m).bindPopup(loc.label);
+  L.circle([loc.lat, loc.lon], {radius: Math.max(loc.radius_km*1000, 30), color: '#22c55e', fillOpacity: .15}).addTo(m);
+}
+</script></body></html>
